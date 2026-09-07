@@ -18,7 +18,7 @@ kernel/          — само ядро (no_std, no_main)
   src/theme.rs       — Color/Wallpaper/Theme, DEFAULT_THEME и SOLID_THEME
   src/terminal.rs    — рисует обои, бар и панель терминала по теме
   src/serial.rs      — драйвер COM1 для логов/паники
-limine.cfg         — конфиг загрузчика (ветка limine v7.x-binary)
+limine.conf         — конфиг загрузчика (Limine, ветка latest-binary)
 Makefile            — kernel / limine / iso / run / clean
 .github/workflows/  — сборка ISO в CI
 ```
@@ -34,10 +34,12 @@ make iso   # соберёт kernel/target/.../cios-kernel и cios.iso
 make run   # то же самое + запуск в QEMU (serial выводится в stdout)
 ```
 
-Первая сборка попробует скачать crate `limine` и клонировать
-репозиторий `limine-bootloader/limine` — при отсутствии сети (как в
-песочнице, где это писалось) собрать и запустить нельзя, но структура
-готова к сборке в GitHub Actions или на твоей машине.
+Первая сборка попробует скачать crate `limine` (версия `0.6.x`) и
+клонировать репозиторий `limine-bootloader/limine` (ветка
+`latest-binary`, чтобы сборка загрузчика поддерживала ту же base
+revision, что просит крейт) — при отсутствии сети (как в песочнице,
+где это писалось) собрать и запустить нельзя, но структура готова к
+сборке в GitHub Actions или на твоей машине.
 
 ## Как работает прозрачность терминала
 

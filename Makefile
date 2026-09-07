@@ -12,7 +12,7 @@ kernel:
 
 limine:
 	@if [ ! -d limine ]; then \
-		git clone https://github.com/limine-bootloader/limine.git --branch=v7.x-binary --depth=1 ; \
+		git clone https://github.com/limine-bootloader/limine.git --branch=latest-binary --depth=1 ; \
 		$(MAKE) -C limine ; \
 	fi
 
@@ -20,7 +20,7 @@ iso: kernel limine
 	rm -rf iso_root
 	mkdir -p iso_root/boot/limine
 	cp $(KERNEL_BIN) iso_root/boot/cios.elf
-	cp limine.cfg iso_root/boot/limine/
+	cp limine.conf iso_root/boot/limine/
 	cp limine/limine-bios.sys iso_root/boot/limine/
 	cp limine/limine-bios-cd.bin iso_root/boot/limine/
 	cp limine/limine-uefi-cd.bin iso_root/boot/limine/
