@@ -1,0 +1,4 @@
+/kernel/target/
+/limine/
+/iso_root/
+*.iso
