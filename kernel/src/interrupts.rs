@@ -7,7 +7,7 @@
 
 use lazy_static::lazy_static;
 use pc_keyboard::layouts::Us104Key;
-use pc_keyboard::{HandleControl, Keyboard, ScancodeSet1};
+use pc_keyboard::{HandleControl, PS2Keyboard, ScancodeSet1};
 use pic8259::ChainedPics;
 use spin::Mutex;
 use x86_64::instructions::port::Port;
@@ -33,9 +33,6 @@ impl InterruptIndex {
     fn as_u8(self) -> u8 {
         self as u8
     }
-    fn as_usize(self) -> usize {
-        self.as_u8() as usize
-    }
 }
 
 lazy_static! {
@@ -45,8 +42,8 @@ lazy_static! {
         idt.double_fault.set_handler_fn(double_fault_handler);
         idt.general_protection_fault.set_handler_fn(gpf_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
-        idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
-        idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::Timer.as_u8()].set_handler_fn(timer_interrupt_handler);
+        idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
         idt
     };
 }
@@ -102,8 +99,8 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
 }
 
 lazy_static! {
-    static ref KEYBOARD: Mutex<Keyboard<Us104Key, ScancodeSet1>> =
-        Mutex::new(Keyboard::new(ScancodeSet1::new(), Us104Key, HandleControl::Ignore));
+    static ref KEYBOARD: Mutex<PS2Keyboard<Us104Key, ScancodeSet1>> =
+        Mutex::new(PS2Keyboard::new(ScancodeSet1::new(), Us104Key, HandleControl::Ignore));
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {

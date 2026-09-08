@@ -1,10 +1,14 @@
 #![no_std]
 #![no_main]
+#![feature(abi_x86_interrupt)]
+
+extern crate alloc;
 
 mod font;
 mod framebuffer;
 mod interrupts;
 mod keyboard_queue;
+mod memory;
 mod serial;
 mod terminal;
 mod text;
@@ -72,11 +76,13 @@ extern "C" fn kmain() -> ! {
     let theme = &theme::DEFAULT_THEME;
     terminal::draw_desktop(&mut fb, theme, "", 0);
 
+    memory::init();
     interrupts::init();
     serial::print("CIOS: entering event loop (type something, arrows move cursor)\n");
 
-    // Простой строчный редактор без кучи (Phase 3 ещё впереди) — буфер
-    // фиксированного размера прямо на стеке кадра kmain.
+    // Строчный буфер пока фиксированного размера на стеке — куча уже
+    // есть (memory::init() выше), но переезд на alloc::string::String
+    // с полноценным многострочным буфером — отдельная задача (Phase 4/7).
     let mut line_buf = [0u8; 63];
     let mut line_len: usize = 0;
     let mut cursor: usize = 0;

@@ -6,9 +6,11 @@
 
 Статус: **Phase 0–1 готовы**, **Phase 2 готова** (прерывания, PIC,
 PS/2-клавиатура, простой строчный редактор с курсором, управляемым
-стрелками ← →), **Phase 4 — в работе**: ядро грузится через Limine,
-рисует обои, полупрозрачную панель терминала и текст в ней запечённым
-шрифтом `AdwaitaMono Nerd Font` (пока только ASCII 0x20–0x7E —
+стрелками ← →), **Phase 3 готова** (куча ядра через `linked_list_allocator`
+поверх HHDM-региона из Limine memmap — доступны `alloc::vec::Vec`,
+`alloc::string::String` и т.п.), **Phase 4 — в работе**: ядро грузится
+через Limine, рисует обои, полупрозрачную панель терминала и текст в ней
+запечённым шрифтом `AdwaitaMono Nerd Font` (пока только ASCII 0x20–0x7E —
 кириллица и иконки Nerd Font приедут отдельным шагом запекания).
 
 ## Структура
@@ -23,6 +25,7 @@ kernel/             — само ядро (no_std, no_main)
   src/text.rs         — рисование строк по атласу с alpha-блендингом
   src/interrupts.rs   — IDT, PIC, обработчики исключений и клавиатуры
   src/keyboard_queue.rs — кольцевой буфер декодированных нажатий клавиш
+  src/memory.rs       — HHDM/memmap от Limine + куча (linked_list_allocator)
   src/serial.rs       — драйвер COM1 для логов/паники
 tools/font-baker/    — host-инструмент (std): TTF -> бинарный атлас глифов
 assets/fonts/         — AdwaitaMonoNerdFontMono-Regular.ttf + сгенерированный
@@ -78,7 +81,6 @@ crate `fontdue` для `tools/font-baker`. `make kernel`/`make iso`
 ## Дальше по плану (см. предыдущее обсуждение фаз)
 
 Phase 4 доделать (иконки Nerd Font и кириллица в атласе, многострочный
-буфер терминала) → Phase 3 (память/heap — нужен для `Vec`/`String` в
-шелле и командах) → Phase 5 (CSS-подобный конфиг тем) →
-Phase 6 (файловая система) → Phase 7 (шелл, история команд, `↑`/`↓`) →
-Phase 8 (команды: ls/rm/file-sys/...) → ...
+буфер терминала на alloc::string::String) → Phase 5 (CSS-подобный
+конфиг тем) → Phase 6 (файловая система) → Phase 7 (шелл, история
+команд, `↑`/`↓`) → Phase 8 (команды: ls/rm/file-sys/...) → ...
