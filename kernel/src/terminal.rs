@@ -5,7 +5,9 @@
 //! Пока панель рисуется пустой, с плейсхолдер-курсором — этого достаточно,
 //! чтобы увидеть эффект темы (обои + прозрачность) вживую в QEMU.
 
+use crate::font;
 use crate::framebuffer::Framebuffer;
+use crate::text;
 use crate::theme::{BarPosition, Color, Theme, Wallpaper};
 
 pub fn draw_desktop(fb: &mut Framebuffer, theme: &Theme) {
@@ -58,6 +60,17 @@ fn draw_terminal_panel(fb: &mut Framebuffer, theme: &Theme) {
     // Полупрозрачная панель — здесь и работает theme.terminal_bg.a
     fb.fill_rect_blended(x0, y0, w, h, theme.terminal_bg);
 
-    // Плейсхолдер-курсор, пока нет рендера текста (Phase 4).
-    fb.fill_rect(x0 + 8, y0 + 8, 10, 18, theme.cursor);
+    let f = font::font();
+    let inner_pad = 12;
+    let text_x = x0 + inner_pad;
+    let mut text_y = y0 + inner_pad;
+    // Атлас пока содержит только ASCII (0x20..=0x7E) — кириллица и
+    // иконки Nerd Font приедут отдельным шагом запекания.
+    text::draw_text(fb, &f, text_x, text_y, "CIOS - hello, world", theme.terminal_fg);
+    text_y += f.cell_h + 6;
+    text::draw_text(fb, &f, text_x, text_y, "wallpaper + transparent panel: OK", theme.terminal_fg);
+    text_y += f.cell_h + 6;
+    text::draw_text(fb, &f, text_x, text_y, "> ", theme.terminal_fg);
+    // Блочный курсор сразу после приглашения "> ".
+    fb.fill_rect(text_x + 2 * f.cell_w, text_y, f.cell_w, f.cell_h, theme.cursor);
 }

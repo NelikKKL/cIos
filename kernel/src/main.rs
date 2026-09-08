@@ -1,9 +1,11 @@
 #![no_std]
 #![no_main]
 
+mod font;
 mod framebuffer;
 mod serial;
 mod terminal;
+mod text;
 mod theme;
 
 use core::panic::PanicInfo;

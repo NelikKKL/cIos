@@ -1,10 +1,18 @@
-.PHONY: all kernel limine iso run clean
+.PHONY: all kernel limine iso run clean font-atlas
 
 KERNEL_BIN := kernel/target/x86_64-unknown-none/release/cios-kernel
+FONT_TTF := assets/fonts/AdwaitaMonoNerdFontMono-Regular.ttf
+FONT_ATLAS := assets/fonts/font_atlas.bin
 
 all: iso
 
-kernel:
+font-atlas: $(FONT_ATLAS)
+
+$(FONT_ATLAS): $(FONT_TTF) tools/font-baker/src/main.rs tools/font-baker/Cargo.toml
+	cd tools/font-baker && cargo build --release
+	./tools/font-baker/target/release/font-baker $(FONT_TTF) $(FONT_ATLAS)
+
+kernel: font-atlas
 	cd kernel && cargo build --release \
 		-Z build-std=core,alloc,compiler_builtins \
 		-Z build-std-features=compiler-builtins-mem \
@@ -43,4 +51,4 @@ run: iso
 	qemu-system-x86_64 -cdrom cios.iso -serial stdio -m 256M
 
 clean:
-	rm -rf iso_root cios.iso kernel/target
+	rm -rf iso_root cios.iso kernel/target tools/font-baker/target $(FONT_ATLAS)

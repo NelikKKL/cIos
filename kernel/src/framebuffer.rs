@@ -64,6 +64,18 @@ impl Framebuffer {
         Color::rgb(r, g, b)
     }
 
+    /// Блендит один пиксель (alpha берётся из color.a) поверх уже
+    /// нарисованного — используется для покрытия (coverage) глифов.
+    #[inline]
+    pub fn blend_pixel(&mut self, x: usize, y: usize, color: Color) {
+        if color.a == 0 {
+            return;
+        }
+        let under = self.get_pixel(x, y);
+        let blended = color.blend_over(under);
+        self.put_pixel(x, y, blended);
+    }
+
     pub fn fill_rect(&mut self, x0: usize, y0: usize, w: usize, h: usize, color: Color) {
         for y in y0..(y0 + h).min(self.height) {
             for x in x0..(x0 + w).min(self.width) {

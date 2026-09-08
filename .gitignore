@@ -2,3 +2,5 @@
 /limine/
 /iso_root/
 *.iso
+/tools/font-baker/target/
+/assets/fonts/font_atlas.bin
