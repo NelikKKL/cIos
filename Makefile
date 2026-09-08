@@ -12,7 +12,13 @@ kernel:
 
 limine:
 	@if [ ! -d limine ]; then \
-		git clone https://github.com/limine-bootloader/limine.git --branch=latest-binary --depth=1 ; \
+		mkdir -p limine ; \
+		curl -L -o /tmp/limine-binary.tar.gz https://github.com/Limine-Bootloader/Limine/releases/latest/download/limine-binary.tar.gz ; \
+		tar -xzf /tmp/limine-binary.tar.gz -C limine ; \
+		rm -f /tmp/limine-binary.tar.gz ; \
+		if [ ! -f limine/limine-bios.sys ]; then \
+			mv limine/*/* limine/ 2>/dev/null || true ; \
+		fi ; \
 		$(MAKE) -C limine ; \
 	fi
 
@@ -26,9 +32,9 @@ iso: kernel limine
 	cp limine/limine-uefi-cd.bin iso_root/boot/limine/
 	mkdir -p iso_root/EFI/BOOT
 	cp limine/BOOTX64.EFI iso_root/EFI/BOOT/
-	xorriso -as mkisofs -b boot/limine/limine-bios-cd.bin \
-		-no-emul-boot -boot-load-size 4 -boot-info-table \
-		--efi-boot boot/limine/limine-uefi-cd.bin \
+	xorriso -as mkisofs -R -r -J -b boot/limine/limine-bios-cd.bin \
+		-no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus \
+		-apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
 		iso_root -o cios.iso
 	./limine/limine bios-install cios.iso
