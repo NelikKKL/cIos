@@ -5,15 +5,19 @@
 extern crate alloc;
 
 mod font;
+mod fs;
 mod framebuffer;
 mod interrupts;
 mod keyboard_queue;
 mod memory;
 mod serial;
+mod shell;
 mod terminal;
 mod text;
 mod theme;
 
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::panic::PanicInfo;
 use framebuffer::Framebuffer;
 use limine::request::FramebufferRequest;
@@ -71,18 +75,25 @@ extern "C" fn kmain() -> ! {
 
     serial::print("CIOS: framebuffer acquired, drawing desktop\n");
 
+    memory::init();
+    fs::init();
+
+    // История вывода терминала (растёт по мере выполнения команд) и
+    // текущая директория шелла.
+    let mut history: Vec<String> = Vec::new();
+    history.push(String::from("CIOS - type 'help' for a list of commands"));
+    let mut cwd = String::from("/");
+
     // Смени на theme::SOLID_THEME, чтобы увидеть разницу с непрозрачным
     // терминалом — обе темы живут в theme.rs.
     let theme = &theme::DEFAULT_THEME;
-    terminal::draw_desktop(&mut fb, theme, "", 0);
+    terminal::draw_desktop(&mut fb, theme, &history, "", 0);
 
-    memory::init();
     interrupts::init();
     serial::print("CIOS: entering event loop (type something, arrows move cursor)\n");
 
-    // Строчный буфер пока фиксированного размера на стеке — куча уже
-    // есть (memory::init() выше), но переезд на alloc::string::String
-    // с полноценным многострочным буфером — отдельная задача (Phase 4/7).
+    // Строчный буфер ввода пока фиксированного размера на стеке — сама
+    // история вывода уже на куче (Vec<String>, см. выше).
     let mut line_buf = [0u8; 63];
     let mut line_len: usize = 0;
     let mut cursor: usize = 0;
@@ -106,11 +117,15 @@ extern "C" fn kmain() -> ! {
                     }
                 }
                 DecodedKey::Unicode('\n') | DecodedKey::Unicode('\r') => {
-                    serial::print("CIOS: line: ");
-                    if let Ok(s) = core::str::from_utf8(&line_buf[..line_len]) {
-                        serial::print(s);
+                    let line = core::str::from_utf8(&line_buf[..line_len]).unwrap_or("");
+                    history.push(alloc::format!("{cwd} > {line}"));
+                    shell::execute(line, &mut cwd, &mut history);
+                    // Не даём истории расти бесконечно.
+                    const MAX_HISTORY: usize = 200;
+                    if history.len() > MAX_HISTORY {
+                        let excess = history.len() - MAX_HISTORY;
+                        history.drain(0..excess);
                     }
-                    serial::print("\n");
                     line_len = 0;
                     cursor = 0;
                 }
@@ -140,7 +155,7 @@ extern "C" fn kmain() -> ! {
 
         if dirty {
             let text = core::str::from_utf8(&line_buf[..line_len]).unwrap_or("");
-            terminal::draw_desktop(&mut fb, theme, text, cursor);
+            terminal::draw_desktop(&mut fb, theme, &history, text, cursor);
         }
     }
 }
