@@ -96,20 +96,11 @@ pub fn execute(line: &str, cwd: &mut String, history: &mut Vec<String>) {
             history.clear();
         }
         "file-sys" => {
-            // Полноценный TUI-файловый менеджер со стрелками — отдельная
-            // задача (нужен собственный режим ввода в главном цикле).
-            // Пока то же самое, что 'ls', но подсказывает, что будет дальше.
-            let path = fs::resolve(cwd, ".");
-            match fs::list(&path) {
-                Ok(names) if names.is_empty() => history.push(String::from("(empty)")),
-                Ok(names) => {
-                    history.push(format!("file-sys: {path} (interactive mode: TODO)"));
-                    for n in names {
-                        history.push(format!("  {n}"));
-                    }
-                }
-                Err(e) => history.push(format!("file-sys: {e}")),
-            }
+            // Основной вход — через main.rs (голое 'file-sys' + Enter
+            // переключает главный цикл в интерактивный режим со своим
+            // рендером и обработкой стрелок). Сюда попадаем только если
+            // после 'file-sys' были лишние аргументы.
+            history.push(String::from("file-sys takes no arguments — just run 'file-sys'"));
         }
         other => {
             history.push(format!("{other}: command not found"));

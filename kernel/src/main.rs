@@ -40,6 +40,14 @@ static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
 #[link_section = ".requests_end_marker"]
 static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
+/// Режим главного цикла: обычный шелл или интерактивный файловый
+/// менеджер (команда `file-sys`). У каждого — свой обработчик клавиш
+/// и свой рендер (terminal::draw_desktop vs terminal::draw_file_manager).
+enum Mode {
+    Shell,
+    FileManager { path: String, entries: Vec<String>, selected: usize },
+}
+
 #[no_mangle]
 extern "C" fn kmain() -> ! {
     serial::init();
@@ -97,6 +105,7 @@ extern "C" fn kmain() -> ! {
     let mut line_buf = [0u8; 63];
     let mut line_len: usize = 0;
     let mut cursor: usize = 0;
+    let mut mode = Mode::Shell;
 
     loop {
         // Спим до следующего прерывания — просыпаемся на любое нажатие
@@ -106,56 +115,114 @@ extern "C" fn kmain() -> ! {
         let mut dirty = false;
         while let Some(key) = keyboard_queue::pop() {
             dirty = true;
-            match key {
-                DecodedKey::Unicode('\u{8}') | DecodedKey::RawKey(KeyCode::Backspace) => {
-                    if cursor > 0 {
-                        for i in (cursor - 1)..(line_len - 1) {
-                            line_buf[i] = line_buf[i + 1];
+            // Смена режима откладывается до конца итерации: нельзя
+            // переприсвоить `mode`, пока внутри match всё ещё живут
+            // заимствования его полей (path/entries/selected).
+            let mut pending_mode: Option<Mode> = None;
+
+            match &mut mode {
+                Mode::Shell => match key {
+                    DecodedKey::Unicode('\u{8}') | DecodedKey::RawKey(KeyCode::Backspace) => {
+                        if cursor > 0 {
+                            for i in (cursor - 1)..(line_len - 1) {
+                                line_buf[i] = line_buf[i + 1];
+                            }
+                            line_len -= 1;
+                            cursor -= 1;
                         }
-                        line_len -= 1;
-                        cursor -= 1;
                     }
-                }
-                DecodedKey::Unicode('\n') | DecodedKey::Unicode('\r') => {
-                    let line = core::str::from_utf8(&line_buf[..line_len]).unwrap_or("");
-                    history.push(alloc::format!("{cwd} > {line}"));
-                    shell::execute(line, &mut cwd, &mut history);
-                    // Не даём истории расти бесконечно.
-                    const MAX_HISTORY: usize = 200;
-                    if history.len() > MAX_HISTORY {
-                        let excess = history.len() - MAX_HISTORY;
-                        history.drain(0..excess);
-                    }
-                    line_len = 0;
-                    cursor = 0;
-                }
-                DecodedKey::RawKey(KeyCode::ArrowLeft) => {
-                    if cursor > 0 {
-                        cursor -= 1;
-                    }
-                }
-                DecodedKey::RawKey(KeyCode::ArrowRight) => {
-                    if cursor < line_len {
-                        cursor += 1;
-                    }
-                }
-                DecodedKey::Unicode(c) if (c as u32) >= 0x20 && (c as u32) < 0x7F => {
-                    if line_len < line_buf.len() {
-                        for i in (cursor..line_len).rev() {
-                            line_buf[i + 1] = line_buf[i];
+                    DecodedKey::Unicode('\n') | DecodedKey::Unicode('\r') => {
+                        let line = core::str::from_utf8(&line_buf[..line_len]).unwrap_or("");
+                        if line.trim() == "file-sys" {
+                            let path = fs::resolve(&cwd, ".");
+                            let entries = fs::list(&path).unwrap_or_default();
+                            pending_mode = Some(Mode::FileManager { path, entries, selected: 0 });
+                        } else {
+                            history.push(alloc::format!("{cwd} > {line}"));
+                            shell::execute(line, &mut cwd, &mut history);
+                            const MAX_HISTORY: usize = 200;
+                            if history.len() > MAX_HISTORY {
+                                let excess = history.len() - MAX_HISTORY;
+                                history.drain(0..excess);
+                            }
                         }
-                        line_buf[cursor] = c as u8;
-                        line_len += 1;
-                        cursor += 1;
+                        line_len = 0;
+                        cursor = 0;
                     }
+                    DecodedKey::RawKey(KeyCode::ArrowLeft) => {
+                        if cursor > 0 {
+                            cursor -= 1;
+                        }
+                    }
+                    DecodedKey::RawKey(KeyCode::ArrowRight) => {
+                        if cursor < line_len {
+                            cursor += 1;
+                        }
+                    }
+                    DecodedKey::Unicode(c) if (c as u32) >= 0x20 && (c as u32) < 0x7F => {
+                        if line_len < line_buf.len() {
+                            for i in (cursor..line_len).rev() {
+                                line_buf[i + 1] = line_buf[i];
+                            }
+                            line_buf[cursor] = c as u8;
+                            line_len += 1;
+                            cursor += 1;
+                        }
+                    }
+                    _ => {}
+                },
+                Mode::FileManager { path, entries, selected } => match key {
+                    DecodedKey::RawKey(KeyCode::ArrowUp) => {
+                        *selected = selected.saturating_sub(1);
+                    }
+                    DecodedKey::RawKey(KeyCode::ArrowDown) => {
+                        if !entries.is_empty() {
+                            *selected = (*selected + 1).min(entries.len() - 1);
+                        }
+                    }
+                    DecodedKey::Unicode('\n') | DecodedKey::Unicode('\r') => {
+                        if let Some(name) = entries.get(*selected) {
+                            if let Some(dir_name) = name.strip_suffix('/') {
+                                *path = fs::resolve(path, dir_name);
+                                *entries = fs::list(path).unwrap_or_default();
+                                *selected = 0;
+                            }
+                            // Файл: превью — отдельная задача, пока не открываем.
+                        }
+                    }
+                    DecodedKey::Unicode('\u{8}')
+                    | DecodedKey::RawKey(KeyCode::Backspace)
+                    | DecodedKey::RawKey(KeyCode::ArrowLeft) => {
+                        *path = fs::resolve(path, "..");
+                        *entries = fs::list(path).unwrap_or_default();
+                        *selected = 0;
+                    }
+                    DecodedKey::RawKey(KeyCode::Escape) | DecodedKey::Unicode('q') => {
+                        cwd = path.clone();
+                        pending_mode = Some(Mode::Shell);
+                    }
+                    _ => {}
+                },
+            }
+
+            if let Some(new_mode) = pending_mode {
+                if matches!(new_mode, Mode::Shell) {
+                    history.push(String::from("file-sys: closed"));
                 }
-                _ => {}
+                mode = new_mode;
             }
         }
 
         if dirty {
-            let text = core::str::from_utf8(&line_buf[..line_len]).unwrap_or("");
-            terminal::draw_desktop(&mut fb, theme, &history, text, cursor);
+            match &mode {
+                Mode::Shell => {
+                    let text = core::str::from_utf8(&line_buf[..line_len]).unwrap_or("");
+                    terminal::draw_desktop(&mut fb, theme, &history, text, cursor);
+                }
+                Mode::FileManager { path, entries, selected } => {
+                    terminal::draw_file_manager(&mut fb, theme, path, entries, *selected);
+                }
+            }
         }
     }
 }
