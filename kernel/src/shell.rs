@@ -9,7 +9,8 @@ use alloc::vec::Vec;
 use crate::fs;
 
 /// Список команд для `help` и, позже, автодополнения.
-pub const COMMANDS: &[&str] = &["ls", "cat", "rm", "mkdir", "touch", "cd", "pwd", "echo", "clear", "help", "file-sys"];
+pub const COMMANDS: &[&str] =
+    &["ls", "cat", "rm", "mkdir", "touch", "cd", "pwd", "echo", "clear", "help", "file-sys", "css"];
 
 /// Выполняет одну командную строку, дописывая построчный вывод в
 /// `history`. `cwd` — текущая директория (абсолютный путь, всегда
@@ -101,6 +102,10 @@ pub fn execute(line: &str, cwd: &mut String, history: &mut Vec<String>) {
             // рендером и обработкой стрелок). Сюда попадаем только если
             // после 'file-sys' были лишние аргументы.
             history.push(String::from("file-sys takes no arguments — just run 'file-sys'"));
+        }
+        "css" => {
+            // Основной вход — через main.rs, так же как file-sys.
+            history.push(String::from("css takes no arguments — just run 'css'"));
         }
         other => {
             history.push(format!("{other}: command not found"));

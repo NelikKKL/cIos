@@ -1,14 +1,25 @@
 //! Рендер "рабочего стола": обои + полупрозрачная панель терминала + бар.
-//! Панель теперь показывает настоящую прокручиваемую историю вывода
-//! шелла (fs.rs/shell.rs), а не два захардкоженных демо-текста.
+//!
+//! Важно для производительности: обои и бар перерисовываются только
+//! когда меняется тема (см. `draw_*` функции без суффикса — вызываются
+//! из main.rs при первом кадре и при смене темы через `css`). На
+//! обычный ввод (печать, стрелки) main.rs вызывает `draw_*_panel` —
+//! они трогают только область панели, а не весь экран. Раньше на
+//! каждое нажатие клавиши перерисовывался весь framebuffer (обои +
+//! alpha-блендинг бара + панели), что на некоторых разрешениях/машинах
+//! ощущалось как зависание клавиатуры — на деле клавиатура работала,
+//! просто перерисовка не поспевала.
 
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use crate::font;
 use crate::framebuffer::Framebuffer;
 use crate::text;
-use crate::theme::{BarPosition, Color, Theme, Wallpaper};
+use crate::theme::{BarPosition, Color, PanelShape, Theme, Wallpaper};
 
+/// Полный кадр: обои + бар + панель терминала. Вызывать только на
+/// первом кадре и когда меняется тема — иначе см. draw_terminal_panel.
 pub fn draw_desktop(
     fb: &mut Framebuffer,
     theme: &Theme,
@@ -38,6 +49,9 @@ fn draw_wallpaper(fb: &mut Framebuffer, theme: &Theme) {
                 }
             }
         }
+        Wallpaper::Bitmap(bmp) => {
+            bmp.blit_scaled(fb);
+        }
     }
 }
 
@@ -51,22 +65,33 @@ fn draw_bar(fb: &mut Framebuffer, theme: &Theme) {
     fb.fill_rect_blended(0, y0, fb.width, h, theme.bar.background);
 }
 
-/// Общая геометрия панели (обе рисуют один и тот же полупрозрачный
-/// прямоугольник, просто наполняют его по-разному).
+/// Общая геометрия панели (все режимы рисуют один и тот же
+/// полупрозрачный прямоугольник, просто наполняют его по-разному). При
+/// PanelShape::Square панель — центрированный квадрат, а не во всю
+/// ширину экрана (тема Default: "сделай терминал квадратным").
 fn panel_geometry(fb: &Framebuffer, theme: &Theme) -> (usize, usize, usize, usize) {
     let pad = theme.terminal_padding_px as usize;
     let bar_h = match theme.bar.position {
         BarPosition::Hidden => 0,
         _ => theme.bar.height_px as usize,
     };
-    let x0 = pad;
-    let y0 = pad;
-    let w = fb.width.saturating_sub(pad * 2);
-    let h = fb.height.saturating_sub(pad * 2 + bar_h);
-    (x0, y0, w, h)
+    let avail_w = fb.width.saturating_sub(pad * 2);
+    let avail_h = fb.height.saturating_sub(pad * 2 + bar_h);
+
+    match theme.panel_shape {
+        PanelShape::Fill => (pad, pad, avail_w, avail_h),
+        PanelShape::Square => {
+            let side = avail_w.min(avail_h);
+            let x0 = pad + (avail_w.saturating_sub(side)) / 2;
+            let y0 = pad + (avail_h.saturating_sub(side)) / 2;
+            (x0, y0, side, side)
+        }
+    }
 }
 
-fn draw_terminal_panel(
+/// Только содержимое панели шелла (без обоев/бара) — это и есть
+/// "лёгкая" перерисовка на каждое нажатие клавиши.
+pub fn draw_terminal_panel(
     fb: &mut Framebuffer,
     theme: &Theme,
     history: &[String],
@@ -108,13 +133,18 @@ fn draw_terminal_panel(
     fb.fill_rect(cursor_x, text_y, f.cell_w, f.cell_h, theme.cursor);
 }
 
-/// Интерактивный файловый менеджер (команда `file-sys`): список файлов
-/// текущей директории, выбранная строка подсвечена. Навигация — в
-/// main.rs (стрелки/Enter/Backspace/Esc), здесь только рендер.
+/// Полный кадр файлового менеджера (обои + бар + список). Только для
+/// первого кадра после входа в режим — дальше см. draw_file_manager_panel.
 pub fn draw_file_manager(fb: &mut Framebuffer, theme: &Theme, path: &str, entries: &[String], selected: usize) {
     draw_wallpaper(fb, theme);
     draw_bar(fb, theme);
+    draw_file_manager_panel(fb, theme, path, entries, selected);
+}
 
+/// Интерактивный файловый менеджер (команда `file-sys`): список файлов
+/// текущей директории, выбранная строка подсвечена. Только область
+/// панели — лёгкая перерисовка на каждое нажатие (стрелки и т.п.).
+pub fn draw_file_manager_panel(fb: &mut Framebuffer, theme: &Theme, path: &str, entries: &[String], selected: usize) {
     let (x0, y0, w, h) = panel_geometry(fb, theme);
     fb.fill_rect_blended(x0, y0, w, h, theme.terminal_bg);
 
@@ -165,4 +195,94 @@ fn clip_to_cols(s: &str, max_cols: usize) -> &str {
         Some((byte_idx, _)) => &s[..byte_idx],
         None => s,
     }
+}
+
+/// Пункты меню команды `css` — порядок важен, main.rs индексирует по нему.
+pub const CSS_MENU_OPTIONS: &[&str] = &["Create custom CSS", "Default", "Autumn", "Snow"];
+
+/// Полный кадр меню `css` (обои + бар + список). Только для первого
+/// кадра после входа в режим — дальше см. draw_css_menu_panel.
+pub fn draw_css_menu(fb: &mut Framebuffer, theme: &Theme, selected: usize) {
+    draw_wallpaper(fb, theme);
+    draw_bar(fb, theme);
+    draw_css_menu_panel(fb, theme, selected);
+}
+
+/// Меню выбора темы (команда `css`): список из CSS_MENU_OPTIONS,
+/// выбранный пункт подсвечен. Только область панели.
+pub fn draw_css_menu_panel(fb: &mut Framebuffer, theme: &Theme, selected: usize) {
+    let (x0, y0, w, h) = panel_geometry(fb, theme);
+    fb.fill_rect_blended(x0, y0, w, h, theme.terminal_bg);
+
+    let f = font::font();
+    let inner_pad = 12;
+    let text_x = x0 + inner_pad;
+    let usable_w = w.saturating_sub(inner_pad * 2);
+    let max_cols = (usable_w / f.cell_w).max(1);
+
+    let mut y = y0 + inner_pad;
+    text::draw_text(fb, &f, text_x, y, clip_to_cols("css: choose a theme (arrows/enter)", max_cols), theme.terminal_fg);
+    y += f.cell_h + 4;
+
+    let highlight_fg = Color::rgb(theme.terminal_bg.r, theme.terminal_bg.g, theme.terminal_bg.b);
+    for (i, label) in CSS_MENU_OPTIONS.iter().enumerate() {
+        let clipped = clip_to_cols(label, max_cols.saturating_sub(2));
+        if i == selected {
+            fb.fill_rect(text_x, y, usable_w, f.cell_h, theme.cursor);
+            text::draw_text(fb, &f, text_x + f.cell_w, y, clipped, highlight_fg);
+        } else {
+            text::draw_text(fb, &f, text_x + f.cell_w, y, clipped, theme.terminal_fg);
+        }
+        y += f.cell_h;
+    }
+}
+
+/// Полный кадр редактора CSS (обои + бар + текст). Только для первого
+/// кадра после входа в режим — дальше см. draw_css_editor_panel.
+pub fn draw_css_editor(fb: &mut Framebuffer, theme: &Theme, buffer: &str) {
+    draw_wallpaper(fb, theme);
+    draw_bar(fb, theme);
+    draw_css_editor_panel(fb, theme, buffer);
+}
+
+/// Редактор произвольного CSS (пункт "Create custom CSS"): многострочный
+/// буфер (Enter вставляет перевод строки), курсор всегда в конце
+/// последней строки. Только область панели.
+pub fn draw_css_editor_panel(fb: &mut Framebuffer, theme: &Theme, buffer: &str) {
+    let (x0, y0, w, h) = panel_geometry(fb, theme);
+    fb.fill_rect_blended(x0, y0, w, h, theme.terminal_bg);
+
+    let f = font::font();
+    let inner_pad = 12;
+    let text_x = x0 + inner_pad;
+    let usable_h = h.saturating_sub(inner_pad * 2);
+    let usable_w = w.saturating_sub(inner_pad * 2);
+    let max_rows = (usable_h / f.cell_h).max(1);
+    let max_cols = (usable_w / f.cell_w).max(1);
+
+    let mut y = y0 + inner_pad;
+    text::draw_text(
+        fb,
+        &f,
+        text_x,
+        y,
+        clip_to_cols("css editor - Escape applies (empty+Escape cancels)", max_cols),
+        theme.terminal_fg,
+    );
+    y += f.cell_h + 4;
+
+    let lines: Vec<&str> = buffer.split('\n').collect();
+    let body_rows = max_rows.saturating_sub(2).max(1);
+    let start = lines.len().saturating_sub(body_rows);
+    for line in &lines[start..] {
+        text::draw_text(fb, &f, text_x, y, clip_to_cols(line, max_cols), theme.terminal_fg);
+        y += f.cell_h;
+    }
+
+    // Курсор — в конце последней показанной строки.
+    let last_line = lines[start..].last().copied().unwrap_or("");
+    let cursor_col = last_line.chars().count().min(max_cols);
+    let cursor_x = text_x + cursor_col * f.cell_w;
+    let cursor_y = y.saturating_sub(f.cell_h);
+    fb.fill_rect(cursor_x, cursor_y, f.cell_w, f.cell_h, theme.cursor);
 }

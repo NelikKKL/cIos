@@ -1,8 +1,9 @@
-.PHONY: all kernel limine iso run clean font-atlas
+.PHONY: all kernel limine iso run clean font-atlas wallpapers
 
 KERNEL_BIN := kernel/target/x86_64-unknown-none/release/cios-kernel
 FONT_TTF := assets/fonts/AdwaitaMonoNerdFontMono-Regular.ttf
 FONT_ATLAS := assets/fonts/font_atlas.bin
+WALLPAPER_RAWS := assets/wallpapers/default.raw assets/wallpapers/autumn.raw assets/wallpapers/snow.raw
 
 all: iso
 
@@ -12,7 +13,21 @@ $(FONT_ATLAS): $(FONT_TTF) tools/font-baker/src/main.rs tools/font-baker/Cargo.t
 	cd tools/font-baker && cargo build --release
 	./tools/font-baker/target/release/font-baker $(FONT_TTF) $(FONT_ATLAS)
 
-kernel: font-atlas
+wallpapers: $(WALLPAPER_RAWS)
+
+tools/wallpaper-baker/target/release/wallpaper-baker: tools/wallpaper-baker/src/main.rs tools/wallpaper-baker/Cargo.toml
+	cd tools/wallpaper-baker && cargo build --release
+
+assets/wallpapers/default.raw: assets/wallpapers/default.jpg tools/wallpaper-baker/target/release/wallpaper-baker
+	./tools/wallpaper-baker/target/release/wallpaper-baker assets/wallpapers/default.jpg assets/wallpapers/default.raw
+
+assets/wallpapers/autumn.raw: assets/wallpapers/autumn.jpg tools/wallpaper-baker/target/release/wallpaper-baker
+	./tools/wallpaper-baker/target/release/wallpaper-baker assets/wallpapers/autumn.jpg assets/wallpapers/autumn.raw
+
+assets/wallpapers/snow.raw: assets/wallpapers/snow.jpg tools/wallpaper-baker/target/release/wallpaper-baker
+	./tools/wallpaper-baker/target/release/wallpaper-baker assets/wallpapers/snow.jpg assets/wallpapers/snow.raw
+
+kernel: font-atlas wallpapers
 	cd kernel && cargo build --release \
 		-Z build-std=core,alloc,compiler_builtins \
 		-Z build-std-features=compiler-builtins-mem \
@@ -51,4 +66,4 @@ run: iso
 	qemu-system-x86_64 -cdrom cios.iso -serial stdio -m 256M
 
 clean:
-	rm -rf iso_root cios.iso kernel/target tools/font-baker/target $(FONT_ATLAS)
+	rm -rf iso_root cios.iso kernel/target tools/font-baker/target tools/wallpaper-baker/target $(FONT_ATLAS) $(WALLPAPER_RAWS)

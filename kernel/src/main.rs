@@ -4,6 +4,8 @@
 
 extern crate alloc;
 
+mod bitmap;
+mod css;
 mod font;
 mod fs;
 mod framebuffer;
@@ -46,6 +48,8 @@ static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 enum Mode {
     Shell,
     FileManager { path: String, entries: Vec<String>, selected: usize },
+    CssMenu { selected: usize },
+    CssEditor { buffer: String },
 }
 
 #[no_mangle]
@@ -93,9 +97,10 @@ extern "C" fn kmain() -> ! {
     let mut cwd = String::from("/");
 
     // Смени на theme::SOLID_THEME, чтобы увидеть разницу с непрозрачным
-    // терминалом — обе темы живут в theme.rs.
-    let theme = &theme::DEFAULT_THEME;
-    terminal::draw_desktop(&mut fb, theme, &history, "", 0);
+    // терминалом — обе темы живут в theme.rs. Команда `css` в шелле
+    // переключает тему в рантайме (см. Mode::CssMenu/CssEditor ниже).
+    let mut theme = theme::DEFAULT_THEME;
+    terminal::draw_desktop(&mut fb, &theme, &history, "", 0);
 
     interrupts::init();
     serial::print("CIOS: entering event loop (type something, arrows move cursor)\n");
@@ -113,6 +118,7 @@ extern "C" fn kmain() -> ! {
         x86_64::instructions::hlt();
 
         let mut dirty = false;
+        let mut theme_changed = false;
         while let Some(key) = keyboard_queue::pop() {
             dirty = true;
             // Смена режима откладывается до конца итерации: нельзя
@@ -137,6 +143,8 @@ extern "C" fn kmain() -> ! {
                             let path = fs::resolve(&cwd, ".");
                             let entries = fs::list(&path).unwrap_or_default();
                             pending_mode = Some(Mode::FileManager { path, entries, selected: 0 });
+                        } else if line.trim() == "css" {
+                            pending_mode = Some(Mode::CssMenu { selected: 0 });
                         } else {
                             history.push(alloc::format!("{cwd} > {line}"));
                             shell::execute(line, &mut cwd, &mut history);
@@ -199,28 +207,112 @@ extern "C" fn kmain() -> ! {
                     }
                     DecodedKey::RawKey(KeyCode::Escape) | DecodedKey::Unicode('q') => {
                         cwd = path.clone();
+                        history.push(String::from("file-sys: closed"));
                         pending_mode = Some(Mode::Shell);
+                    }
+                    _ => {}
+                },
+                Mode::CssMenu { selected } => match key {
+                    DecodedKey::RawKey(KeyCode::ArrowUp) => {
+                        *selected = selected.saturating_sub(1);
+                    }
+                    DecodedKey::RawKey(KeyCode::ArrowDown) => {
+                        *selected = (*selected + 1).min(terminal::CSS_MENU_OPTIONS.len() - 1);
+                    }
+                    DecodedKey::Unicode('\n') | DecodedKey::Unicode('\r') => match *selected {
+                        0 => {
+                            pending_mode = Some(Mode::CssEditor { buffer: String::new() });
+                        }
+                        1 => {
+                            theme = theme::DEFAULT_THEME;
+                            theme_changed = true;
+                            history.push(String::from("theme: default"));
+                            pending_mode = Some(Mode::Shell);
+                        }
+                        2 => {
+                            theme = theme::AUTUMN_THEME;
+                            theme_changed = true;
+                            history.push(String::from("theme: autumn"));
+                            pending_mode = Some(Mode::Shell);
+                        }
+                        3 => {
+                            theme = theme::SNOW_THEME;
+                            theme_changed = true;
+                            history.push(String::from("theme: snow"));
+                            pending_mode = Some(Mode::Shell);
+                        }
+                        _ => {}
+                    },
+                    DecodedKey::RawKey(KeyCode::Escape) | DecodedKey::Unicode('q') => {
+                        pending_mode = Some(Mode::Shell);
+                    }
+                    _ => {}
+                },
+                Mode::CssEditor { buffer } => match key {
+                    DecodedKey::Unicode('\u{8}') | DecodedKey::RawKey(KeyCode::Backspace) => {
+                        buffer.pop();
+                    }
+                    DecodedKey::Unicode('\n') | DecodedKey::Unicode('\r') => {
+                        buffer.push('\n');
+                    }
+                    DecodedKey::RawKey(KeyCode::Escape) => {
+                        if buffer.trim().is_empty() {
+                            history.push(String::from("css: cancelled"));
+                        } else {
+                            theme = css::parse(buffer, theme);
+                            theme_changed = true;
+                            history.push(String::from("css: custom theme applied"));
+                        }
+                        pending_mode = Some(Mode::Shell);
+                    }
+                    DecodedKey::Unicode(c) if (c as u32) >= 0x20 && (c as u32) < 0x7F => {
+                        buffer.push(c);
                     }
                     _ => {}
                 },
             }
 
             if let Some(new_mode) = pending_mode {
-                if matches!(new_mode, Mode::Shell) {
-                    history.push(String::from("file-sys: closed"));
-                }
                 mode = new_mode;
             }
         }
 
         if dirty {
-            match &mode {
-                Mode::Shell => {
-                    let text = core::str::from_utf8(&line_buf[..line_len]).unwrap_or("");
-                    terminal::draw_desktop(&mut fb, theme, &history, text, cursor);
+            if theme_changed {
+                // Тема (а с ней обои/бар) поменялась — нужен полный кадр.
+                match &mode {
+                    Mode::Shell => {
+                        let text = core::str::from_utf8(&line_buf[..line_len]).unwrap_or("");
+                        terminal::draw_desktop(&mut fb, &theme, &history, text, cursor);
+                    }
+                    Mode::FileManager { path, entries, selected } => {
+                        terminal::draw_file_manager(&mut fb, &theme, path, entries, *selected);
+                    }
+                    Mode::CssMenu { selected } => {
+                        terminal::draw_css_menu(&mut fb, &theme, *selected);
+                    }
+                    Mode::CssEditor { buffer } => {
+                        terminal::draw_css_editor(&mut fb, &theme, buffer);
+                    }
                 }
-                Mode::FileManager { path, entries, selected } => {
-                    terminal::draw_file_manager(&mut fb, theme, path, entries, *selected);
+            } else {
+                // Обычный ввод — обои/бар не менялись, трогаем только
+                // область панели. Это и есть исправление лага: раньше
+                // здесь перерисовывался весь экран на каждую клавишу.
+                match &mode {
+                    Mode::Shell => {
+                        let text = core::str::from_utf8(&line_buf[..line_len]).unwrap_or("");
+                        terminal::draw_terminal_panel(&mut fb, &theme, &history, text, cursor);
+                    }
+                    Mode::FileManager { path, entries, selected } => {
+                        terminal::draw_file_manager_panel(&mut fb, &theme, path, entries, *selected);
+                    }
+                    Mode::CssMenu { selected } => {
+                        terminal::draw_css_menu_panel(&mut fb, &theme, *selected);
+                    }
+                    Mode::CssEditor { buffer } => {
+                        terminal::draw_css_editor_panel(&mut fb, &theme, buffer);
+                    }
                 }
             }
         }

@@ -4,3 +4,5 @@
 *.iso
 /tools/font-baker/target/
 /assets/fonts/font_atlas.bin
+/tools/wallpaper-baker/target/
+/assets/wallpapers/*.raw
