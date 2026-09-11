@@ -103,14 +103,56 @@ lazy_static! {
         Mutex::new(PS2Keyboard::new(ScancodeSet1::new(), Us104Key, HandleControl::Ignore));
 }
 
+/// Держим ли сейчас Ctrl/Alt. pc_keyboard с HandleControl::Ignore не
+/// превращает Ctrl+буква в управляющий байт (отдаёт обычную 'o'), а
+/// nano-режиму нужно отличать ^O от просто 'o' — поэтому состояние
+/// модификаторов трекаем сами прямо по сырым скан-кодам Set 1, не
+/// полагаясь на внутренности pc_keyboard. Left/Right Ctrl = 0x1D
+/// (Right приходит с префиксом 0xE0), Left/Right Alt = 0x38 (Right —
+/// это AltGr, тоже с префиксом 0xE0). Бит 0x80 в скан-коде — это
+/// "отпускание" клавиши (break code).
+struct Modifiers {
+    ctrl: bool,
+    alt: bool,
+}
+
+static MODIFIERS: Mutex<Modifiers> = Mutex::new(Modifiers { ctrl: false, alt: false });
+
+fn track_modifiers(scancode: u8) {
+    if scancode == 0xE0 {
+        // Префикс расширенной клавиши (Right Ctrl/Alt, стрелки и
+        // т.п.) — сам по себе ничего не меняет, реальный код придёт
+        // следующим байтом.
+        return;
+    }
+    let is_break = scancode & 0x80 != 0;
+    let code = scancode & 0x7F;
+    let mut mods = MODIFIERS.lock();
+    match code {
+        // 0x1D/0x38 с префиксом 0xE0 — это Right Ctrl / Right Alt
+        // (AltGr), без префикса — Left Ctrl / Left Alt. В Scancode
+        // Set 1 эти же коды с 0xE0 никогда не означают ничего другого,
+        // так что дальше можно не различать левую/правую клавишу.
+        0x1D => mods.ctrl = !is_break,
+        0x38 => mods.alt = !is_break,
+        _ => {}
+    }
+}
+
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     let mut port = Port::new(0x60);
     let scancode: u8 = unsafe { port.read() };
 
+    track_modifiers(scancode);
+    let (ctrl, alt) = {
+        let mods = MODIFIERS.lock();
+        (mods.ctrl, mods.alt)
+    };
+
     let mut keyboard = KEYBOARD.lock();
     if let Ok(Some(event)) = keyboard.add_byte(scancode) {
         if let Some(key) = keyboard.process_keyevent(event) {
-            crate::keyboard_queue::push(key);
+            crate::keyboard_queue::push(key, ctrl, alt);
         }
     }
 

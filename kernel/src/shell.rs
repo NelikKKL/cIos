@@ -9,8 +9,9 @@ use alloc::vec::Vec;
 use crate::fs;
 
 /// Список команд для `help` и, позже, автодополнения.
-pub const COMMANDS: &[&str] =
-    &["ls", "cat", "rm", "mkdir", "touch", "cd", "pwd", "echo", "clear", "help", "file-sys", "css"];
+pub const COMMANDS: &[&str] = &[
+    "ls", "cat", "rm", "mkdir", "touch", "cd", "pwd", "echo", "clear", "help", "file-sys", "css", "nano", "nanoc",
+];
 
 /// Выполняет одну командную строку, дописывая построчный вывод в
 /// `history`. `cwd` — текущая директория (абсолютный путь, всегда
@@ -106,6 +107,16 @@ pub fn execute(line: &str, cwd: &mut String, history: &mut Vec<String>) {
         "css" => {
             // Основной вход — через main.rs, так же как file-sys.
             history.push(String::from("css takes no arguments — just run 'css'"));
+        }
+        "nano" => {
+            // Основной вход — через main.rs ('nano' или 'nano <файл>'
+            // сразу переключают главный цикл в режим редактора). Сюда
+            // попасть в норме нельзя — оставлено как подстраховка.
+            history.push(String::from("usage: nano [file]"));
+        }
+        "nanoc" => {
+            // То же самое, но C-версия того же редактора (kernel/src/nano_c/).
+            history.push(String::from("usage: nanoc [file]"));
         }
         other => {
             history.push(format!("{other}: command not found"));

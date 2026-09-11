@@ -17,8 +17,27 @@ jobs:
         with:
           components: rust-src
 
+      # kernel/build.rs now also compiles kernel/src/nano_c/*.c (the C
+      # version of the nano clone, see NANO_C.md) via the `cc` crate.
+      # build-essential already provides gcc/cc, so no new apt package
+      # is strictly required — kept explicit here anyway so this step
+      # keeps working if that ever changes.
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y xorriso build-essential
+        run: sudo apt-get update && sudo apt-get install -y xorriso build-essential gcc
+
+      - name: Cache cargo/target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            kernel
+            tools/font-baker
+            tools/wallpaper-baker
+
+      - name: Show toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+          cc --version
 
       - name: Build ISO
         run: make iso
@@ -28,3 +47,49 @@ jobs:
         with:
           name: cios-iso
           path: cios.iso
+
+  # kernel/build.rs picks a C compiler via the `cc` crate (defaults to
+  # plain `cc`, honors the CC env var otherwise — see comments in
+  # kernel/build.rs). The C bridge under kernel/src/nano_c/ was written
+  # without ever being compiler-checked (no toolchain in the sandbox it
+  # was written in, see NANO_C.md), so this job exists purely to catch
+  # compiler-specific breakage early by building the kernel (not the
+  # full ISO — no need to redo font/wallpaper baking or xorriso here)
+  # against clang as well as the gcc used above.
+  build-kernel-clang:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Cache cargo/target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            kernel
+            tools/font-baker
+            tools/wallpaper-baker
+          key: clang
+
+      - name: Show toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+          clang --version
+
+      # `make kernel` (not a bare `cargo build`) because font.rs/bitmap.rs
+      # embed baked assets via include_bytes! at compile time — those
+      # come from the font-atlas/wallpapers prerequisites already wired
+      # into the Makefile's `kernel` target, so this stays in sync with
+      # it instead of duplicating flags that could drift.
+      - name: Build kernel with CC=clang
+        env:
+          CC: clang
+        run: make kernel

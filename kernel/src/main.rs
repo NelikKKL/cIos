@@ -12,6 +12,9 @@ mod framebuffer;
 mod interrupts;
 mod keyboard_queue;
 mod memory;
+mod nano;
+mod nano_c;
+mod nano_ffi;
 mod serial;
 mod shell;
 mod terminal;
@@ -50,6 +53,8 @@ enum Mode {
     FileManager { path: String, entries: Vec<String>, selected: usize },
     CssMenu { selected: usize },
     CssEditor { buffer: String },
+    Nano(nano::Editor),
+    NanoC(nano_c::Editor),
 }
 
 #[no_mangle]
@@ -119,7 +124,10 @@ extern "C" fn kmain() -> ! {
 
         let mut dirty = false;
         let mut theme_changed = false;
-        while let Some(key) = keyboard_queue::pop() {
+        while let Some(evt) = keyboard_queue::pop() {
+            let key = evt.key;
+            let ctrl = evt.ctrl;
+            let alt = evt.alt;
             dirty = true;
             // Смена режима откладывается до конца итерации: нельзя
             // переприсвоить `mode`, пока внутри match всё ещё живут
@@ -145,6 +153,14 @@ extern "C" fn kmain() -> ! {
                             pending_mode = Some(Mode::FileManager { path, entries, selected: 0 });
                         } else if line.trim() == "css" {
                             pending_mode = Some(Mode::CssMenu { selected: 0 });
+                        } else if line.trim() == "nano" || line.trim().starts_with("nano ") {
+                            let arg = line.trim().strip_prefix("nano").unwrap_or("").trim();
+                            let path = if arg.is_empty() { None } else { Some(fs::resolve(&cwd, arg)) };
+                            pending_mode = Some(Mode::Nano(nano::Editor::open(path.as_deref())));
+                        } else if line.trim() == "nanoc" || line.trim().starts_with("nanoc ") {
+                            let arg = line.trim().strip_prefix("nanoc").unwrap_or("").trim();
+                            let path = if arg.is_empty() { None } else { Some(fs::resolve(&cwd, arg)) };
+                            pending_mode = Some(Mode::NanoC(nano_c::Editor::open(path.as_deref())));
                         } else {
                             history.push(alloc::format!("{cwd} > {line}"));
                             shell::execute(line, &mut cwd, &mut history);
@@ -270,6 +286,20 @@ extern "C" fn kmain() -> ! {
                     }
                     _ => {}
                 },
+                Mode::Nano(editor) => match editor.handle_key(key, ctrl, alt) {
+                    nano::Outcome::Continue => {}
+                    nano::Outcome::Exit(message) => {
+                        history.push(message);
+                        pending_mode = Some(Mode::Shell);
+                    }
+                },
+                Mode::NanoC(editor) => match editor.handle_key(key, ctrl, alt) {
+                    nano_c::Outcome::Continue => {}
+                    nano_c::Outcome::Exit(message) => {
+                        history.push(message);
+                        pending_mode = Some(Mode::Shell);
+                    }
+                },
             }
 
             if let Some(new_mode) = pending_mode {
@@ -294,6 +324,12 @@ extern "C" fn kmain() -> ! {
                     Mode::CssEditor { buffer } => {
                         terminal::draw_css_editor(&mut fb, &theme, buffer);
                     }
+                    Mode::Nano(editor) => {
+                        terminal::draw_nano(&mut fb, &theme, editor);
+                    }
+                    Mode::NanoC(editor) => {
+                        terminal::draw_nano_c(&mut fb, &theme, editor);
+                    }
                 }
             } else {
                 // Обычный ввод — обои/бар не менялись, трогаем только
@@ -312,6 +348,12 @@ extern "C" fn kmain() -> ! {
                     }
                     Mode::CssEditor { buffer } => {
                         terminal::draw_css_editor_panel(&mut fb, &theme, buffer);
+                    }
+                    Mode::Nano(editor) => {
+                        terminal::draw_nano_panel(&mut fb, &theme, editor);
+                    }
+                    Mode::NanoC(editor) => {
+                        terminal::draw_nano_c_panel(&mut fb, &theme, editor);
                     }
                 }
             }

@@ -165,6 +165,31 @@ pub fn make_dir(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Создаёт файл с указанным содержимым, либо перезаписывает уже
+/// существующий. Нужно для сохранения (^O) в nano-режиме — make_file
+/// умеет только создавать пустые файлы и падает, если файл уже есть.
+pub fn write(path: &str, content: &[u8]) -> Result<(), String> {
+    let mut guard = ROOT.lock();
+    let root = guard.as_mut().expect("fs not initialized");
+    let parts = split_path(path);
+    if parts.is_empty() {
+        return Err(String::from("cannot write root"));
+    }
+    let (children, name) =
+        find_parent_mut(root, &parts).ok_or_else(|| String::from("no such parent directory"))?;
+    match children.iter_mut().find(|(n, _)| n == &name) {
+        Some((_, Node::File(data))) => {
+            *data = content.to_vec();
+            Ok(())
+        }
+        Some((_, Node::Dir(_))) => Err(String::from("is a directory")),
+        None => {
+            children.push((name, Node::File(content.to_vec())));
+            Ok(())
+        }
+    }
+}
+
 pub fn make_file(path: &str) -> Result<(), String> {
     let mut guard = ROOT.lock();
     let root = guard.as_mut().expect("fs not initialized");
