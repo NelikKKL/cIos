@@ -16,12 +16,27 @@ pub struct Bitmap {
 
 const HEADER_LEN: usize = 8;
 
+/// Отбрасывает заголовок (см. формат в tools/wallpaper-baker) через
+/// прямую конструкцию среза по указателю — НЕ через `&RAW[HEADER_LEN..]`.
+/// Обычное срез-индексирование идёт через типаж `Index`, а он в
+/// static-контексте на свежих nightly требует нестабильных
+/// `#![feature(const_index, const_trait_impl)]` (регрессия/изменение
+/// компилятора, всплывшее уже после того, как этот файл писался —
+/// `from_raw_parts` того же самого не требует, это отдельный, давно
+/// стабильный const fn).
+const fn strip_header(raw: &'static [u8]) -> &'static [u8] {
+    // SAFETY: raw всегда получен из include_bytes! готового .raw-файла
+    // (см. tools/wallpaper-baker), который всегда >= HEADER_LEN байт —
+    // формат гарантирует 8-байтовый заголовок перед пикселями.
+    unsafe { core::slice::from_raw_parts(raw.as_ptr().add(HEADER_LEN), raw.len() - HEADER_LEN) }
+}
+
 macro_rules! bake_bitmap {
     ($path:literal) => {{
         const RAW: &[u8] = include_bytes!($path);
         const W: u32 = u32::from_le_bytes([RAW[0], RAW[1], RAW[2], RAW[3]]);
         const H: u32 = u32::from_le_bytes([RAW[4], RAW[5], RAW[6], RAW[7]]);
-        Bitmap { width: W, height: H, pixels: &RAW[HEADER_LEN..] }
+        Bitmap { width: W, height: H, pixels: strip_header(RAW) }
     }};
 }
 

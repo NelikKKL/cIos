@@ -14,9 +14,13 @@
  *                  cios_alloc(len) -- освобождать РОВНО cios_free(ptr,len),
  *                  а не nl_free() (у этого буфера нет заголовка размера,
  *                  который ожидает nl_free)! При ошибке возвращает NULL.
- *   cios_fs_write: 0 при успехе, -1 при ошибке. */
+ *   cios_fs_write: 0 при успехе, -1 при ошибке.
+ *   cios_free:     см. предупреждение выше -- используется здесь
+ *                  напрямую (в обход nl_free) именно для буферов от
+ *                  cios_fs_read(). */
 extern uint8_t *cios_fs_read(const char *path, size_t *out_len);
 extern int cios_fs_write(const char *path, const uint8_t *data, size_t len);
+extern void cios_free(void *ptr, size_t size);
 
 #define NANO_STATUS_CAP 160
 #define NANO_INPUT_CAP 200

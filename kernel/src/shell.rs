@@ -10,7 +10,7 @@ use crate::fs;
 
 /// Список команд для `help` и, позже, автодополнения.
 pub const COMMANDS: &[&str] = &[
-    "ls", "cat", "rm", "mkdir", "touch", "cd", "pwd", "echo", "clear", "help", "file-sys", "css", "nano", "nanoc",
+    "ls", "cat", "rm", "mkdir", "touch", "cd", "pwd", "echo", "clear", "help", "file-sys", "css", "nano",
 ];
 
 /// Выполняет одну командную строку, дописывая построчный вывод в
@@ -113,10 +113,6 @@ pub fn execute(line: &str, cwd: &mut String, history: &mut Vec<String>) {
             // сразу переключают главный цикл в режим редактора). Сюда
             // попасть в норме нельзя — оставлено как подстраховка.
             history.push(String::from("usage: nano [file]"));
-        }
-        "nanoc" => {
-            // То же самое, но C-версия того же редактора (kernel/src/nano_c/).
-            history.push(String::from("usage: nanoc [file]"));
         }
         other => {
             history.push(format!("{other}: command not found"));

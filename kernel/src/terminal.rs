@@ -197,6 +197,13 @@ fn clip_to_cols(s: &str, max_cols: usize) -> &str {
     }
 }
 
+/// Ключи в панели горячих клавиш рисуются тем же цветом курсора темы
+/// (лёгкий акцент), чтобы отличаться от описания — как выделение
+/// ключа отдельным цветом в onekey() оригинала.
+fn inverse_fg_shortcut(theme: &Theme) -> Color {
+    theme.cursor
+}
+
 /// Полный кадр nano-режима (обои + бар + панель редактора). Только для
 /// первого кадра после входа в режим — дальше см. draw_nano_panel.
 pub fn draw_nano(fb: &mut Framebuffer, theme: &Theme, editor: &crate::nano::Editor) {
@@ -205,11 +212,11 @@ pub fn draw_nano(fb: &mut Framebuffer, theme: &Theme, editor: &crate::nano::Edit
     draw_nano_panel(fb, theme, editor);
 }
 
-/// Редактор `nano` (см. nano.rs): title bar сверху, тело буфера
-/// посередине, статус-строка/активный prompt + панель горячих клавиш
-/// снизу — тот же трёхчастный макет, что и в настоящем nano
-/// (titlebar()/edit window/bottombars() в winio.c оригинала). Только
-/// область панели — лёгкая перерисовка на каждое нажатие.
+/// Редактор `nano`: title bar сверху, тело буфера посередине,
+/// статус-строка/активный prompt + панель горячих клавиш снизу — тот
+/// же трёхчастный макет, что и в настоящем nano (titlebar()/edit
+/// window/bottombars() в winio.c оригинала). Только область панели —
+/// лёгкая перерисовка на каждое нажатие.
 pub fn draw_nano_panel(fb: &mut Framebuffer, theme: &Theme, editor: &crate::nano::Editor) {
     let (x0, y0, w, h) = panel_geometry(fb, theme);
     fb.fill_rect_blended(x0, y0, w, h, theme.terminal_bg);
@@ -222,12 +229,8 @@ pub fn draw_nano_panel(fb: &mut Framebuffer, theme: &Theme, editor: &crate::nano
     let max_rows = (usable_h / f.cell_h).max(1);
     let max_cols = (usable_w / f.cell_w).max(1);
 
-    // Текст поверх theme.cursor (та же инверсия, что использует
-    // draw_file_manager_panel/draw_css_menu_panel для подсветки).
     let inverse_fg = Color::rgb(theme.terminal_bg.r, theme.terminal_bg.g, theme.terminal_bg.b);
 
-    // --- Title bar: одна строка сверху, залитая цветом курсора темы,
-    // как синяя титульная строка в настоящем nano. ---
     fb.fill_rect(x0, y0, w, f.cell_h, theme.cursor);
     let (prefix, path, state) = editor.title_parts();
     let mut title = alloc::format!("cIos nano-clone    {prefix}{}{path}", if prefix.is_empty() { "" } else { " " });
@@ -238,9 +241,6 @@ pub fn draw_nano_panel(fb: &mut Framebuffer, theme: &Theme, editor: &crate::nano
     let title_x = x0 + inner_pad + usable_w.saturating_sub(title_cols * f.cell_w) / 2;
     text::draw_text(fb, &f, title_x, y0 + inner_pad, clip_to_cols(&title, max_cols), inverse_fg);
 
-    // --- Нижние 3 строки: статус/prompt + 2 строки горячих клавиш,
-    // прибиты к низу панели (как в оригинале), независимо от того,
-    // сколько строк тела реально нарисовано выше. ---
     let reserved_bottom = 3usize.min(max_rows.saturating_sub(1));
     let bottom_y = y0 + h.saturating_sub(inner_pad) - reserved_bottom * f.cell_h;
 
@@ -274,147 +274,12 @@ pub fn draw_nano_panel(fb: &mut Framebuffer, theme: &Theme, editor: &crate::nano
         }
     }
 
-    // --- Тело буфера, между title bar и нижней зоной. ---
-    let body_top = y0 + inner_pad + f.cell_h + 4;
-    let body_rows = if bottom_y > body_top { (bottom_y - body_top) / f.cell_h } else { 0 };
-    let mut y = body_top;
-
-    if let Some(crate::nano::Prompt::Help) = &editor.prompt {
-        for line in crate::nano::HELP_LINES.iter().take(body_rows) {
-            text::draw_text(fb, &f, text_x, y, clip_to_cols(line, max_cols), theme.terminal_fg);
-            y += f.cell_h;
-        }
-        return;
-    }
-
-    if body_rows == 0 {
-        return;
-    }
-
-    let start = if editor.cursor_line >= body_rows {
-        editor.cursor_line + 1 - body_rows
-    } else {
-        0
-    };
-    let end = editor.lines.len().min(start + body_rows);
-
-    // Горизонтальный скролл вокруг курсора — как в оригинале, где
-    // длинная строка не переносится, а прокручивается, с '$' по краям
-    // как индикатором того, что текст продолжается за экраном.
-    let left = if editor.cursor_col >= max_cols {
-        editor.cursor_col + 1 - max_cols
-    } else {
-        0
-    };
-
-    for (i, line) in editor.lines[start..end].iter().enumerate() {
-        let li = start + i;
-        let chars: Vec<char> = line.chars().collect();
-        let visible_end = (left + max_cols).min(chars.len());
-        let mut shown: String = if left < chars.len() {
-            chars[left..visible_end].iter().collect()
-        } else {
-            String::new()
-        };
-        if left > 0 && !shown.is_empty() {
-            let first_len = shown.chars().next().unwrap().len_utf8();
-            shown.replace_range(0..first_len, "$");
-        }
-        if chars.len() > left + shown.chars().count() {
-            if let Some((last_byte, last_char)) = shown.char_indices().last() {
-                shown.replace_range(last_byte..last_byte + last_char.len_utf8(), "$");
-            }
-        }
-        text::draw_text(fb, &f, text_x, y, &shown, theme.terminal_fg);
-
-        if li == editor.cursor_line {
-            let cursor_screen_col = editor.cursor_col.saturating_sub(left);
-            fb.fill_rect(text_x + cursor_screen_col * f.cell_w, y, f.cell_w, f.cell_h, theme.cursor);
-        }
-        y += f.cell_h;
-    }
-}
-
-/// Ключи в панели горячих клавиш рисуются тем же цветом курсора темы
-/// (лёгкий акцент), чтобы отличаться от описания — как выделение
-/// ключа отдельным цветом в onekey() оригинала.
-fn inverse_fg_shortcut(theme: &Theme) -> Color {
-    theme.cursor
-}
-
-/// То же самое, что draw_nano, но для C-версии редактора
-/// (kernel/src/nano_c/). См. draw_nano_c_panel — единственная разница
-/// с draw_nano_panel в том, что тут данные достаются через методы
-/// nano_c::Editor (FFI-вызовы в C), а не напрямую из публичных полей.
-pub fn draw_nano_c(fb: &mut Framebuffer, theme: &Theme, editor: &crate::nano_c::Editor) {
-    draw_wallpaper(fb, theme);
-    draw_bar(fb, theme);
-    draw_nano_c_panel(fb, theme, editor);
-}
-
-pub fn draw_nano_c_panel(fb: &mut Framebuffer, theme: &Theme, editor: &crate::nano_c::Editor) {
-    let (x0, y0, w, h) = panel_geometry(fb, theme);
-    fb.fill_rect_blended(x0, y0, w, h, theme.terminal_bg);
-
-    let f = font::font();
-    let inner_pad = 12;
-    let text_x = x0 + inner_pad;
-    let usable_h = h.saturating_sub(inner_pad * 2);
-    let usable_w = w.saturating_sub(inner_pad * 2);
-    let max_rows = (usable_h / f.cell_h).max(1);
-    let max_cols = (usable_w / f.cell_w).max(1);
-
-    let inverse_fg = Color::rgb(theme.terminal_bg.r, theme.terminal_bg.g, theme.terminal_bg.b);
-
-    fb.fill_rect(x0, y0, w, f.cell_h, theme.cursor);
-    let (prefix, path, state) = editor.title_parts();
-    let mut title = alloc::format!("cIos nano-clone (C)    {prefix}{}{path}", if prefix.is_empty() { "" } else { " " });
-    if !state.is_empty() {
-        title = alloc::format!("{title}   [{state}]");
-    }
-    let title_cols = title.chars().count().min(max_cols);
-    let title_x = x0 + inner_pad + usable_w.saturating_sub(title_cols * f.cell_w) / 2;
-    text::draw_text(fb, &f, title_x, y0 + inner_pad, clip_to_cols(&title, max_cols), inverse_fg);
-
-    let reserved_bottom = 3usize.min(max_rows.saturating_sub(1));
-    let bottom_y = y0 + h.saturating_sub(inner_pad) - reserved_bottom * f.cell_h;
-
-    let status_text = editor.prompt_line();
-    text::draw_text(fb, &f, text_x, bottom_y, clip_to_cols(&status_text, max_cols), theme.terminal_fg);
-    if editor.prompt_has_cursor() {
-        let cx = text_x + status_text.chars().count().min(max_cols) * f.cell_w;
-        fb.fill_rect(cx, bottom_y, f.cell_w, f.cell_h, theme.cursor);
-    }
-
-    if reserved_bottom >= 3 {
-        let shortcuts_y = bottom_y + f.cell_h;
-        let cols_per_row = (crate::nano_c::MAIN_SHORTCUTS.len() + 1) / 2;
-        let cell = usable_w / cols_per_row.max(1);
-        for (i, item) in crate::nano_c::MAIN_SHORTCUTS.iter().enumerate() {
-            let (key, desc) = *item;
-            let row = i % 2;
-            let col = i / 2;
-            let cx = text_x + col * cell;
-            let cy = shortcuts_y + row * f.cell_h;
-            text::draw_text(fb, &f, cx, cy, key, inverse_fg_shortcut(theme));
-            let key_cols = key.chars().count() + 1;
-            text::draw_text(
-                fb,
-                &f,
-                cx + key_cols * f.cell_w,
-                cy,
-                clip_to_cols(desc, cell.saturating_sub(key_cols * f.cell_w).max(1) / f.cell_w.max(1)),
-                theme.terminal_fg,
-            );
-        }
-    }
-
     let body_top = y0 + inner_pad + f.cell_h + 4;
     let body_rows = if bottom_y > body_top { (bottom_y - body_top) / f.cell_h } else { 0 };
     let mut y = body_top;
 
     if editor.help_active() {
-        for line in crate::nano_c::Editor::help_lines().into_iter().take(body_rows) {
+        for line in crate::nano::Editor::help_lines().into_iter().take(body_rows) {
             text::draw_text(fb, &f, text_x, y, clip_to_cols(line, max_cols), theme.terminal_fg);
             y += f.cell_h;
         }
