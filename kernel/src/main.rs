@@ -123,6 +123,7 @@ extern "C" fn kmain() -> ! {
         let mut dirty = false;
         let mut theme_changed = false;
         while let Some(evt) = keyboard_queue::pop() {
+            serial::print("CIOS: main loop popped a key event\n");
             let key = evt.key;
             let ctrl = evt.ctrl;
             let alt = evt.alt;
@@ -295,6 +296,7 @@ extern "C" fn kmain() -> ! {
         }
 
         if dirty {
+            serial::print("CIOS: redraw start\n");
             if theme_changed {
                 // Тема (а с ней обои/бар) поменялась — нужен полный кадр.
                 match &mode {
@@ -338,6 +340,7 @@ extern "C" fn kmain() -> ! {
                     }
                 }
             }
+            serial::print("CIOS: redraw done\n");
         }
     }
 }

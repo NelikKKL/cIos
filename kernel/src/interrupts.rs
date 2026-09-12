@@ -143,6 +143,15 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     let mut port = Port::new(0x60);
     let scancode: u8 = unsafe { port.read() };
 
+    // ВРЕМЕННЫЙ диагностический вывод (см. запрос про зависание
+    // клавиатуры) — если этой строки нет в serial-логе вообще, значит
+    // IRQ1 не доходит до CPU (проблема в PIC/IOAPIC на стороне
+    // VirtualBox, не в этом коде). Если есть — прерывание работает,
+    // проблема дальше по цепочке (в главном цикле/рендере).
+    serial::print("CIOS: IRQ1 scancode=0x");
+    print_hex_byte(scancode);
+    serial::print("\n");
+
     track_modifiers(scancode);
     let (ctrl, alt) = {
         let mods = MODIFIERS.lock();
@@ -158,5 +167,15 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
 
     unsafe {
         PICS.lock().notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+    }
+}
+
+/// Печатает байт как два hex-символа — без format!/alloc, чтобы можно
+/// было звать прямо из обработчика прерывания без лишних зависимостей.
+fn print_hex_byte(b: u8) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let bytes = [HEX[(b >> 4) as usize], HEX[(b & 0x0F) as usize]];
+    if let Ok(s) = core::str::from_utf8(&bytes) {
+        serial::print(s);
     }
 }
